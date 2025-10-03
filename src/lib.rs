@@ -1,3 +1,4 @@
+pub mod ec2;
 pub mod imds;
 pub mod request;
 pub mod s3;
