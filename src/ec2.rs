@@ -82,19 +82,13 @@ impl Api {
     pub fn attach_volume(&self, input: AttachVolumeInput) -> Result<AttachVolumeOutput> {
         let req = ureq::post(&self.url());
 
-        let mut params = vec![
+        let params = vec![
             ("Action".into(), "AttachVolume".into()),
             ("Version".into(), "2016-11-15".into()),
+            ("Device".into(), input.device),
+            ("InstanceId".into(), input.instance_id),
+            ("VolumeId".into(), input.volume_id),
         ];
-        if let Some(device) = input.device {
-            params.push(("Device".into(), device));
-        }
-        if let Some(instance_id) = input.instance_id {
-            params.push(("InstanceId".into(), instance_id));
-        }
-        if let Some(volume_id) = input.volume_id {
-            params.push(("VolumeId".into(), volume_id));
-        }
 
         match self.send(req, params) {
             Ok(response) => {
@@ -230,15 +224,14 @@ impl ToParams for Vec<String> {
     }
 }
 
-#[skip_serializing_none]
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct AttachVolumeInput {
     #[serde(rename = "Device")]
-    pub device: Option<String>,
+    pub device: String,
     #[serde(rename = "InstanceId")]
-    pub instance_id: Option<String>,
+    pub instance_id: String,
     #[serde(rename = "VolumeId")]
-    pub volume_id: Option<String>,
+    pub volume_id: String,
 }
 
 #[skip_serializing_none]
