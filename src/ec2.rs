@@ -65,7 +65,7 @@ impl From<serde_xml_rs::Error> for Error {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Api {
     credentials: Credentials,
     region: String,
@@ -185,7 +185,7 @@ trait ToParams {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Filter {
     pub name: String,
     pub values: Vec<String>,
@@ -224,7 +224,7 @@ impl ToParams for Vec<String> {
     }
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct AttachVolumeInput {
     #[serde(rename = "Device")]
     pub device: String,
@@ -235,7 +235,7 @@ pub struct AttachVolumeInput {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct AttachVolumeOutput {
     #[serde(rename = "associatedResource")]
     pub associated_resource: Option<String>,
@@ -258,7 +258,7 @@ pub struct AttachVolumeOutput {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct DescribeVolumesInput {
     pub filters: Option<Vec<Filter>>,
     pub max_results: Option<u32>,
@@ -289,7 +289,7 @@ impl DescribeVolumesInput {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct DescribeVolumesOutput {
     #[serde(rename = "nextToken")]
     pub next_token: Option<String>,
@@ -300,14 +300,14 @@ pub struct DescribeVolumesOutput {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct VolumeSet {
     #[serde(rename = "item")]
     pub items: Option<Vec<Volume>>,
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Volume {
     #[serde(rename = "attachments")]
     pub attachments: Option<AttachmentSet>,
@@ -336,14 +336,14 @@ pub struct Volume {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct AttachmentSet {
     #[serde(rename = "item")]
     pub items: Option<Vec<Attachment>>,
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Attachment {
     #[serde(rename = "associatedResource")]
     pub associated_resource: Option<String>,
@@ -363,7 +363,7 @@ pub struct Attachment {
     pub volume_id: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     Attaching,
@@ -378,7 +378,7 @@ pub enum Status {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ErrorBody {
     #[serde(rename = "Errors")]
     pub errors: Errors,
@@ -387,13 +387,13 @@ pub struct ErrorBody {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Errors {
     #[serde(rename = "Error")]
     pub error: Vec<ApiError>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ApiError {
     #[serde(rename = "Code")]
     pub code: String,

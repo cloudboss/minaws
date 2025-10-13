@@ -50,7 +50,7 @@ impl From<request::Error> for Error {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ErrorBody {
     #[serde(rename = "__type")]
     pub r#type: String,
@@ -64,7 +64,7 @@ impl Display for ErrorBody {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Api {
     credentials: Credentials,
     region: String,
@@ -143,7 +143,7 @@ impl Api {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct GetParameterInput {
     #[serde(rename = "Name")]
     pub name: String,
@@ -163,14 +163,14 @@ impl GetParameterInput {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct GetParameterOutput {
     #[serde(rename = "Parameter")]
     pub parameter: Option<Parameter>,
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct GetParametersByPathInput {
     #[serde(rename = "MaxResults")]
     pub max_results: Option<u32>,
@@ -214,7 +214,7 @@ impl GetParametersByPathInput {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ParameterStringFilter {
     #[serde(rename = "Key")]
     pub key: String,
@@ -225,7 +225,7 @@ pub struct ParameterStringFilter {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct GetParametersByPathOutput {
     #[serde(rename = "NextToken")]
     pub next_token: Option<String>,
@@ -234,7 +234,7 @@ pub struct GetParametersByPathOutput {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Parameter {
     #[serde(rename = "ARN")]
     pub arn: Option<String>,

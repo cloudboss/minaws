@@ -75,7 +75,7 @@ impl From<serde_xml_rs::Error> for Error {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Api {
     credentials: Credentials,
     region: String,
@@ -159,7 +159,7 @@ impl Api {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct GetObjectInput {
     pub bucket: String,
     pub key: String,
@@ -190,7 +190,7 @@ impl Debug for GetObjectOutput {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ListObjectsV2Input {
     pub bucket: String,
     pub continuation_token: Option<String>,
@@ -215,7 +215,7 @@ impl ListObjectsV2Input {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ListObjectsV2Output {
     #[serde(rename = "CommonPrefixes")]
     pub common_prefixes: Option<Vec<CommonPrefix>>,
@@ -243,14 +243,14 @@ pub struct ListObjectsV2Output {
     pub start_after: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct CommonPrefix {
     #[serde(rename = "Prefix")]
     prefix: String,
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Object {
     #[serde(rename = "ChecksumAlgorithm")]
     pub checksum_algorithm: Option<Vec<String>>,
@@ -271,7 +271,7 @@ pub struct Object {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ErrorBody {
     #[serde(rename = "Code")]
     pub code: String,

@@ -50,7 +50,7 @@ impl From<request::Error> for Error {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ErrorBody {
     #[serde(rename = "__type")]
     pub r#type: String,
@@ -64,7 +64,7 @@ impl Display for ErrorBody {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct Api {
     credentials: Credentials,
     region: String,
@@ -123,7 +123,7 @@ impl Api {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct GetSecretValueInput {
     #[serde(rename = "SecretId")]
     pub secret_id: String,
@@ -149,7 +149,7 @@ impl GetSecretValueInput {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct GetSecretValueOutput {
     #[serde(rename = "ARN")]
     pub arn: String,
