@@ -1,4 +1,7 @@
-use std::{fmt::Display, time::SystemTime};
+use std::{
+    fmt::Display,
+    time::{Duration, Instant, SystemTime},
+};
 
 use aws_sigv4::{
     http_request::{
@@ -8,19 +11,26 @@ use aws_sigv4::{
     sign::v4::SigningParams,
 };
 use aws_smithy_runtime_api::client::identity::Identity;
-use ureq::Request;
+use crossbeam::utils::Backoff;
+use ureq::{Request, Response};
 
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
+    Api(u16, Box<Response>),
     SigningError(SigningError),
+    Transport(Box<ureq::Error>),
 }
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SigningError(e) => write!(f, "Signing error: {}", e),
+            Self::Api(status, response) => {
+                write!(f, "api request error status {}: {:?}", status, response)
+            }
+            Self::SigningError(e) => write!(f, "signing error: {}", e),
+            Self::Transport(e) => write!(f, "http transport error: {}", e),
         }
     }
 }
@@ -28,6 +38,15 @@ impl Display for Error {
 impl From<SigningError> for Error {
     fn from(e: SigningError) -> Self {
         Self::SigningError(e)
+    }
+}
+
+impl From<ureq::Error> for Error {
+    fn from(err: ureq::Error) -> Self {
+        match err {
+            ureq::Error::Status(status, response) => Error::Api(status, Box::new(response)),
+            ureq::Error::Transport(_) => Error::Transport(Box::new(err)),
+        }
     }
 }
 
@@ -76,4 +95,23 @@ fn update_request(mut request: Request, instructions: SigningInstructions) -> Re
         request = request.query(param.0, &param.1);
     }
     request
+}
+
+pub(crate) fn with_retry<F>(mut f: F, timeout_secs: u64) -> Result<Response>
+where
+    F: FnMut() -> std::result::Result<Response, ureq::Error>,
+{
+    let start = Instant::now();
+    let backoff = Backoff::new();
+    loop {
+        match f() {
+            Ok(response) => return Ok(response),
+            Err(e) => {
+                if start.elapsed() > Duration::from_secs(timeout_secs) {
+                    return Err(e.into());
+                }
+                backoff.snooze();
+            }
+        }
+    }
 }

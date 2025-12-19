@@ -1,11 +1,11 @@
-use std::{error, fmt::Display, thread::sleep, time::Duration};
+use std::{error, fmt::Display};
 
 use aws_credential_types::Credentials;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use ureq::Response;
 
-use crate::request::{self, sign_request};
+use crate::request::{self, sign_request, with_retry};
 
 const SERVICE_NAME: &str = "ssm";
 
@@ -13,26 +13,26 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
-    Api(u16, Box<Response>),
     Json(serde_json::Error),
     Request(request::Error),
     SSM(ErrorBody),
-    Transport(Box<ureq::Error>),
 }
 
 impl error::Error for Error {}
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl From<ureq::Error> for Error {
-    fn from(err: ureq::Error) -> Self {
-        match err {
-            ureq::Error::Status(status, response) => Error::Api(status, Box::new(response)),
-            ureq::Error::Transport(_) => Error::Transport(Box::new(err)),
+        match self {
+            Self::Json(e) => write!(f, "json error: {}", e),
+            Self::Request(e) => write!(f, "http request error: {}", e),
+            Self::SSM(eb) => write!(
+                f,
+                "ssm error{}",
+                eb.message
+                    .as_ref()
+                    .map(|msg| format!(": {}", msg))
+                    .unwrap_or_default()
+            ),
         }
     }
 }
@@ -45,7 +45,21 @@ impl From<serde_json::Error> for Error {
 
 impl From<request::Error> for Error {
     fn from(err: request::Error) -> Self {
-        Error::Request(err)
+        match err {
+            request::Error::Api(_, response) => {
+                let body = response.into_reader();
+                match serde_json::from_reader(body) {
+                    Ok(err_body) => Error::SSM(err_body),
+                    Err(e) => Error::Json(e),
+                }
+            }
+            request::Error::SigningError(signing_error) => {
+                Error::Request(request::Error::SigningError(signing_error))
+            }
+            request::Error::Transport(transport_error) => {
+                Error::Request(request::Error::Transport(transport_error))
+            }
+        }
     }
 }
 
@@ -82,17 +96,12 @@ impl Api {
         let mut req = ureq::post(&self.url());
         req = req.set("Content-Type", "application/x-amz-json-1.1");
         req = req.set("X-Amz-Target", "AmazonSSM.GetParameter");
-        match self.send(req, input) {
-            Ok(response) => {
+        self.send(req, input)
+            .and_then(|response| {
                 let output = serde_json::from_reader(response.into_reader())?;
                 Ok(output)
-            }
-            Err(Error::Api(_, response)) => {
-                let err_body = serde_json::from_reader(response.into_reader())?;
-                Err(Error::SSM(err_body))
-            }
-            Err(err) => Err(err),
-        }
+            })
+            .map_err(Into::into)
     }
 
     pub fn get_parameters_by_path(
@@ -102,39 +111,19 @@ impl Api {
         let mut req = ureq::post(&self.url());
         req = req.set("Content-Type", "application/x-amz-json-1.1");
         req = req.set("X-Amz-Target", "AmazonSSM.GetParametersByPath");
-        match self.send(req, input) {
-            Ok(response) => {
+        self.send(req, input)
+            .and_then(|response| {
                 let output = serde_json::from_reader(response.into_reader())?;
                 Ok(output)
-            }
-            Err(Error::Api(_, response)) => {
-                let err_body = serde_json::from_reader(response.into_reader())?;
-                Err(Error::SSM(err_body))
-            }
-            Err(err) => Err(err),
-        }
+            })
+            .map_err(Into::into)
     }
 
-    fn send<I: Serialize>(&self, mut req: ureq::Request, input: I) -> Result<ureq::Response> {
+    fn send<I: Serialize>(&self, mut req: ureq::Request, input: I) -> Result<Response> {
         let body = serde_json::to_vec(&input)?;
         let identity = self.credentials.clone().into();
         req = sign_request(req, &body, &identity, &self.region, SERVICE_NAME)?;
-
-        let mut retries = 0;
-        loop {
-            match req.clone().send_bytes(&body).map_err(Into::into) {
-                Ok(result) => return Ok(result),
-                Err(e) => {
-                    if retries >= 3 {
-                        return Err(e);
-                    }
-                    if retries > 0 {
-                        sleep(Duration::from_millis(retries * 10));
-                    }
-                    retries += 1;
-                }
-            }
-        }
+        with_retry(|| req.clone().send_bytes(&body), 5).map_err(From::from)
     }
 
     fn url(&self) -> String {

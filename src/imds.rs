@@ -9,21 +9,23 @@ pub use aws_credential_types::Credentials;
 use once_cell::sync::OnceCell;
 use ureq::Response;
 
+use crate::request::{self, with_retry};
+
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
     SerdeJson(serde_json::Error),
-    Request(Box<ureq::Error>),
+    Request(Box<request::Error>),
 }
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io(e) => write!(f, "IO error: {}", e),
-            Self::SerdeJson(e) => write!(f, "JSON error: {}", e),
-            Self::Request(e) => write!(f, "HTTP request error: {}", e),
+            Self::Io(e) => write!(f, "io error: {}", e),
+            Self::SerdeJson(e) => write!(f, "json error: {}", e),
+            Self::Request(e) => write!(f, "http request error: {}", e),
         }
     }
 }
@@ -42,8 +44,8 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-impl From<ureq::Error> for Error {
-    fn from(e: ureq::Error) -> Self {
+impl From<request::Error> for Error {
+    fn from(e: request::Error) -> Self {
         Self::Request(Box::new(e))
     }
 }
@@ -66,23 +68,33 @@ impl Imds {
     pub fn get(&self, path: &Path) -> Result<Response> {
         let token_url = format!("{}/latest/api/token", self.endpoint);
         let token = self.token.get_or_try_init(|| {
-            ureq::put(&token_url)
-                .set("X-aws-ec2-metadata-token-ttl-seconds", "21600")
-                .call()
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{}", e)))?
-                .into_string()
+            with_retry(
+                || {
+                    ureq::put(&token_url)
+                        .set("X-aws-ec2-metadata-token-ttl-seconds", "21600")
+                        .call()
+                },
+                5,
+            )
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{}", e)))?
+            .into_string()
         })?;
         let path_str = path.to_string_lossy();
         let url = format!("{}/{}", self.endpoint, path_str);
-        ureq::get(&url)
-            .set("X-aws-ec2-metadata-token", token)
-            .call()
-            .map_err(From::from)
+        with_retry(
+            || {
+                ureq::get(&url)
+                    .set("X-aws-ec2-metadata-token", token)
+                    .call()
+            },
+            5,
+        )
+        .map_err(Into::into)
     }
 
     pub fn get_user_data(&self) -> Result<String> {
         self.get(Path::new("latest/user-data"))
-            .and_then(|response| response.into_string().map_err(From::from))
+            .and_then(|response| response.into_string().map_err(Into::into))
     }
 
     pub fn get_region(&self) -> Result<String> {
@@ -92,7 +104,7 @@ impl Imds {
     pub fn get_metadata(&self, path: &Path) -> Result<String> {
         let full_path = Path::new("latest/meta-data").join(path);
         self.get(&full_path)
-            .and_then(|response| response.into_string().map_err(From::from))
+            .and_then(|response| response.into_string().map_err(Into::into))
     }
 
     pub fn get_credentials(&self) -> Result<Credentials> {

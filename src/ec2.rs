@@ -2,8 +2,6 @@ use std::{
     error,
     fmt::{Debug, Display},
     io,
-    thread::sleep,
-    time::Duration,
 };
 
 use aws_credential_types::Credentials;
@@ -12,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use ureq::Response;
 
-use crate::request::{self, sign_request};
+use crate::request::{self, sign_request, with_retry};
 
 const SERVICE_NAME: &str = "ec2";
 
@@ -20,13 +18,9 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
-    Api(u16, Box<Response>),
-    Http(Box<ureq::Error>),
-    Io(io::Error),
-    Json(serde_json::Error),
-    Request(request::Error),
     EC2(ErrorBody),
-    Transport(Box<ureq::Error>),
+    Io(io::Error),
+    Request(request::Error),
     Xml(serde_xml_rs::Error),
 }
 
@@ -34,15 +28,20 @@ impl error::Error for Error {}
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl From<ureq::Error> for Error {
-    fn from(err: ureq::Error) -> Self {
-        match err {
-            ureq::Error::Status(status, response) => Error::Api(status, Box::new(response)),
-            ureq::Error::Transport(_) => Error::Transport(Box::new(err)),
+        match self {
+            Self::EC2(eb) => write!(
+                f,
+                "ec2 error(s): {}",
+                eb.errors
+                    .error
+                    .iter()
+                    .map(|e| e.message.clone())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
+            Self::Io(e) => write!(f, "io error: {}", e),
+            Self::Request(e) => write!(f, "http request error: {}", e),
+            Self::Xml(e) => write!(f, "xml error: {}", e),
         }
     }
 }
@@ -55,7 +54,21 @@ impl From<io::Error> for Error {
 
 impl From<request::Error> for Error {
     fn from(err: request::Error) -> Self {
-        Error::Request(err)
+        match err {
+            request::Error::Api(_, response) => {
+                let body = response.into_reader();
+                match serde_xml_rs::from_reader(body) {
+                    Ok(err_body) => Error::EC2(err_body),
+                    Err(e) => Error::Xml(e),
+                }
+            }
+            request::Error::SigningError(signing_error) => {
+                Error::Request(request::Error::SigningError(signing_error))
+            }
+            request::Error::Transport(transport_error) => {
+                Error::Request(request::Error::Transport(transport_error))
+            }
+        }
     }
 }
 
@@ -89,20 +102,13 @@ impl Api {
             ("InstanceId".into(), input.instance_id),
             ("VolumeId".into(), input.volume_id),
         ];
-
-        match self.send(req, params) {
-            Ok(response) => {
+        self.send(req, params)
+            .and_then(|response| {
                 let body = response.into_reader();
                 let output = serde_xml_rs::from_reader(body)?;
                 Ok(output)
-            }
-            Err(Error::Api(_, response)) => {
-                let body = response.into_reader();
-                let err_body = serde_xml_rs::from_reader(body)?;
-                Err(Error::EC2(err_body))
-            }
-            Err(err) => Err(err),
-        }
+            })
+            .map_err(Into::into)
     }
 
     pub fn describe_volumes(&self, input: DescribeVolumesInput) -> Result<DescribeVolumesOutput> {
@@ -126,26 +132,16 @@ impl Api {
             params.extend(volume_ids.to_params("VolumeId"));
         }
 
-        match self.send(req, params) {
-            Ok(response) => {
+        self.send(req, params)
+            .and_then(|response| {
                 let body = response.into_reader();
                 let output = serde_xml_rs::from_reader(body)?;
                 Ok(output)
-            }
-            Err(Error::Api(_, response)) => {
-                let body = response.into_reader();
-                let err_body = serde_xml_rs::from_reader(body)?;
-                Err(Error::EC2(err_body))
-            }
-            Err(err) => Err(err),
-        }
+            })
+            .map_err(Into::into)
     }
 
-    fn send(
-        &self,
-        mut req: ureq::Request,
-        params: Vec<(String, String)>,
-    ) -> Result<ureq::Response> {
+    fn send(&self, mut req: ureq::Request, params: Vec<(String, String)>) -> Result<Response> {
         let params_ref: Vec<(&str, &str)> = params
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
@@ -158,21 +154,7 @@ impl Api {
         let identity = self.credentials.clone().into();
         req = sign_request(req, body, &identity, &self.region, SERVICE_NAME)?;
 
-        let mut retries = 0;
-        loop {
-            match req.clone().send_bytes(body).map_err(Into::into) {
-                Ok(result) => return Ok(result),
-                Err(e) => {
-                    if retries >= 3 {
-                        return Err(e);
-                    }
-                    if retries > 0 {
-                        sleep(Duration::from_millis(retries * 10));
-                    }
-                    retries += 1;
-                }
-            }
-        }
+        with_retry(|| req.clone().send_bytes(body), 5).map_err(Into::into)
     }
 
     fn url(&self) -> String {

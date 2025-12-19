@@ -2,8 +2,6 @@ use std::{
     error,
     fmt::{Debug, Display, Formatter},
     io::{self, Read},
-    thread::sleep,
-    time::Duration,
 };
 
 use aws_credential_types::Credentials;
@@ -12,10 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use ureq::Response;
 
-use crate::{
-    imds,
-    request::{self, sign_request},
-};
+use crate::request::{self, sign_request, with_retry};
 
 const SERVICE_NAME: &str = "s3";
 
@@ -23,14 +18,9 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
-    Api(u16, Box<Response>),
-    Http(Box<ureq::Error>),
-    Imds(Box<imds::Error>),
     Io(io::Error),
-    NoSuchBucket,
     Request(request::Error),
     S3(ErrorBody),
-    Transport(Box<ureq::Error>),
     Xml(serde_xml_rs::Error),
 }
 
@@ -38,22 +28,12 @@ impl error::Error for Error {}
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl From<ureq::Error> for Error {
-    fn from(err: ureq::Error) -> Self {
-        match err {
-            ureq::Error::Status(status, response) => Error::Api(status, Box::new(response)),
-            ureq::Error::Transport(_) => Error::Transport(Box::new(err)),
+        match self {
+            Self::Io(e) => write!(f, "io error: {}", e),
+            Self::Request(e) => write!(f, "http request error: {}", e),
+            Self::S3(eb) => write!(f, "s3 error: {}", eb.message),
+            Self::Xml(e) => write!(f, "xml error: {}", e),
         }
-    }
-}
-
-impl From<imds::Error> for Error {
-    fn from(err: imds::Error) -> Self {
-        Error::Imds(Box::new(err))
     }
 }
 
@@ -65,7 +45,21 @@ impl From<io::Error> for Error {
 
 impl From<request::Error> for Error {
     fn from(err: request::Error) -> Self {
-        Error::Request(err)
+        match err {
+            request::Error::Api(_, response) => {
+                let body = response.into_reader();
+                match serde_xml_rs::from_reader(body) {
+                    Ok(err_body) => Error::S3(err_body),
+                    Err(e) => Error::Xml(e),
+                }
+            }
+            request::Error::SigningError(signing_error) => {
+                Error::Request(request::Error::SigningError(signing_error))
+            }
+            request::Error::Transport(transport_error) => {
+                Error::Request(request::Error::Transport(transport_error))
+            }
+        }
     }
 }
 
@@ -99,56 +93,31 @@ impl Api {
         if let Some(prefix) = input.prefix {
             req = req.query("prefix", &prefix);
         }
-        match self.send(req) {
-            Ok(response) => {
+        self.send(req)
+            .and_then(|response| {
                 let body = response.into_reader();
                 let output = serde_xml_rs::from_reader(body)?;
                 Ok(output)
-            }
-            Err(Error::Api(_, response)) => {
-                let body = response.into_reader();
-                let err_body = serde_xml_rs::from_reader(body)?;
-                Err(Error::S3(err_body))
-            }
-            Err(err) => Err(err),
-        }
+            })
+            .map_err(Into::into)
     }
 
     pub fn get_object(&self, input: GetObjectInput) -> Result<GetObjectOutput> {
         let url = &self.url(&input.bucket);
         let req = ureq::get(&format!("{}/{}", url, input.key));
-        match self.send(req) {
-            Ok(response) => Ok(GetObjectOutput {
-                body: response.into_reader(),
-            }),
-            Err(Error::Api(_, response)) => {
-                let body = response.into_reader();
-                let err_body = serde_xml_rs::from_reader(body)?;
-                Err(Error::S3(err_body))
-            }
-            Err(err) => Err(err),
-        }
+        self.send(req)
+            .and_then(|response| {
+                Ok(GetObjectOutput {
+                    body: response.into_reader(),
+                })
+            })
+            .map_err(Into::into)
     }
 
-    fn send(&self, mut req: ureq::Request) -> Result<ureq::Response> {
+    fn send(&self, mut req: ureq::Request) -> Result<Response> {
         let identity = self.credentials.clone().into();
         req = sign_request(req, &[], &identity, &self.region, SERVICE_NAME)?;
-
-        let mut retries = 0;
-        loop {
-            match req.clone().call().map_err(Into::into) {
-                Ok(result) => return Ok(result),
-                Err(e) => {
-                    if retries >= 3 {
-                        return Err(e);
-                    }
-                    if retries > 0 {
-                        sleep(Duration::from_millis(retries * 10));
-                    }
-                    retries += 1;
-                }
-            }
-        }
+        with_retry(|| req.clone().call(), 5).map_err(Into::into)
     }
 
     fn url(&self, bucket: &str) -> String {
